@@ -27,7 +27,6 @@ public class MulticastReceiver extends Thread {
     public void run() {
         try {
             socket.joinGroup(socketAddress, networkInterface);
-            System.out.println("Successful joined group");
             while (MulticastConfig.continueReading) {
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
                 socket.receive(packet);
@@ -41,7 +40,11 @@ public class MulticastReceiver extends Thread {
                         publisher.sendMessage(MulticastPacketMessage.HELLO);
                     }
                     case MulticastPacketMessage.EXIT -> Group.getInstance().deleteAddress(packet.getAddress());
-                    case MulticastPacketMessage.HELLO -> Group.getInstance().addAddress(packet.getAddress());
+                    case MulticastPacketMessage.HELLO -> {
+                        if(!packet.getAddress().equals(InetAddress.getLocalHost())){
+                            Group.getInstance().addAddress(packet.getAddress());
+                        }
+                    }
 
                     default -> {
                     }

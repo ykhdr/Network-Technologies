@@ -33,6 +33,7 @@ public class Main {
 
 
         receiver.start();
+
         publisher.sendMessage(MulticastPacketMessage.JOIN);
         Group.getInstance().addAddress(InetAddress.getLocalHost());
 
