@@ -33,7 +33,7 @@ public class MulticastReceiver extends Thread {
                 socket.receive(packet);
                 String message = new String(packet.getData(), 0, packet.getLength());
 
-                System.out.println("Message recieved: " + message + ".\n From : " + packet.getAddress());
+                System.out.println("Message received: " + message + ". From : " + packet.getAddress());
 
                 switch (message) {
                     case MulticastPacketMessage.JOIN -> {

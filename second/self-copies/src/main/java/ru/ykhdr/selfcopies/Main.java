@@ -21,7 +21,7 @@ public class Main {
 
         Optional<InetAddress> inetAddressOptional = getInetAddress(args[0]);
 
-        if(inetAddressOptional.isEmpty()){
+        if (inetAddressOptional.isEmpty()) {
             System.out.println("Unknown group address");
             return;
         }
@@ -37,13 +37,16 @@ public class Main {
         Group.getInstance().addAddress(InetAddress.getByName(InetAddress.getLocalHost().getHostAddress()));
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-        while(true){
+        while (true) {
             try {
                 String command = reader.readLine();
-                if(command.equals("exit")){
-                    MulticastConfig.continueReading = false;
-                    publisher.sendMessage(MulticastPacketMessage.EXIT);
-                    break;
+                switch (command) {
+                    case "exit " -> {
+                        MulticastConfig.continueReading = false;
+                        publisher.sendMessage(MulticastPacketMessage.EXIT);
+                        return;
+                    }
+                    case "show" -> Group.getInstance().show();
                 }
 
             } catch (IOException e) {
