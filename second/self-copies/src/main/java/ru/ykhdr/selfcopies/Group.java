@@ -34,5 +34,6 @@ public class Group {
     public void show() {
         System.out.println("Current users in group:");
         addresses.forEach(address -> System.out.println("\tUser : " + address.getHostName()));
+        System.out.println();
     }
 }

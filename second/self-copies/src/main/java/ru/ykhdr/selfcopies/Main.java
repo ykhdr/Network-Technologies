@@ -34,14 +34,14 @@ public class Main {
 
         receiver.start();
         publisher.sendMessage(MulticastPacketMessage.JOIN);
-        Group.getInstance().addAddress(InetAddress.getByName(InetAddress.getLocalHost().getHostAddress()));
+        Group.getInstance().addAddress(InetAddress.getLocalHost());
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         while (true) {
             try {
                 String command = reader.readLine();
                 switch (command) {
-                    case "exit " -> {
+                    case "exit" -> {
                         MulticastConfig.continueReading = false;
                         publisher.sendMessage(MulticastPacketMessage.EXIT);
                         return;
