@@ -9,9 +9,11 @@ public class MulticastReceiver extends Thread {
     private final MulticastSocket socket;
     private final InetSocketAddress socketAddress;
     private final NetworkInterface networkInterface;
+    private final MulticastPublisher publisher;
     private final byte[] buf = new byte[256];
 
-    public MulticastReceiver(InetAddress group) {
+    public MulticastReceiver(InetAddress group, MulticastPublisher publisher) {
+        this.publisher = publisher;
         try {
             socket = new MulticastSocket(MulticastConfig.PORT);
             socketAddress = new InetSocketAddress(group, 8080);
@@ -34,10 +36,12 @@ public class MulticastReceiver extends Thread {
                 System.out.println("Message recieved: " + message + ".\n From : " + packet.getAddress());
 
                 switch (message) {
-                    //TODO проверить работает ли getAddress
-                    case MulticastPacketMessage.JOIN -> Group.getInstance().addAddress(packet.getAddress());
+                    case MulticastPacketMessage.JOIN -> {
+                        Group.getInstance().addAddress(packet.getAddress());
+                        publisher.sendMessage(MulticastPacketMessage.HELLO);
+                    }
                     case MulticastPacketMessage.EXIT -> Group.getInstance().deleteAddress(packet.getAddress());
-                    case MulticastPacketMessage.HELLO -> {}
+                    case MulticastPacketMessage.HELLO -> Group.getInstance().addAddress(packet.getAddress());
 
                     default -> {
                     }

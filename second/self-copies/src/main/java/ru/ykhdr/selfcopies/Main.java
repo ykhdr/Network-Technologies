@@ -13,7 +13,7 @@ import java.net.UnknownHostException;
 import java.util.Optional;
 
 public class Main {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws UnknownHostException {
         if (args.length < 1) {
             System.err.println("Expected address argument");
             return;
@@ -28,15 +28,15 @@ public class Main {
 
         InetAddress inetAddress = inetAddressOptional.get();
 
-        MulticastReceiver receiver = new MulticastReceiver(inetAddress);
         MulticastPublisher publisher = new MulticastPublisher(inetAddress);
+        MulticastReceiver receiver = new MulticastReceiver(inetAddress, publisher);
 
 
         receiver.start();
         publisher.sendMessage(MulticastPacketMessage.JOIN);
+        Group.getInstance().addAddress(InetAddress.getByName(InetAddress.getLocalHost().getHostAddress()));
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-
         while(true){
             try {
                 String command = reader.readLine();
