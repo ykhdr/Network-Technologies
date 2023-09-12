@@ -1,7 +1,7 @@
 package ru.ykhdr.selfcopies.multicast;
 
-import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Component;
@@ -13,7 +13,7 @@ import java.net.InetSocketAddress;
 import java.net.MulticastSocket;
 import java.net.NetworkInterface;
 
-@AllArgsConstructor
+@RequiredArgsConstructor
 @Component
 public class MulticastReceiver extends Thread {
     private final @NotNull MulticastSocket multicastSocket;
@@ -38,8 +38,8 @@ public class MulticastReceiver extends Thread {
                 System.out.println("Message received: " + message + ". From : " + packet.getAddress());
 
                 switch (message) {
-                    case MulticastPacketMessage.REPORT -> group.addAddress(packet.getAddress());
-                    case MulticastPacketMessage.LEAVE -> group.deleteAddress(packet.getAddress());
+                    case MulticastPacketMessage.REPORT -> group.addUser(packet.getAddress(),packet.getPort());
+                    case MulticastPacketMessage.LEAVE -> group.deleteUser(packet.getAddress(),packet.getPort() );
                 }
 
             }

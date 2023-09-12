@@ -9,12 +9,10 @@ import ru.ykhdr.selfcopies.multicast.MulticastReceiver;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 
 
 public class Main {
-    public static void main(String[] args) throws UnknownHostException {
+    public static void main(String[] args){
         AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(SpringConfig.class);
 
         Group group = ctx.getBean(Group.class);
@@ -24,9 +22,6 @@ public class Main {
 
         receiver.start();
 
-        publisher.sendMessage(MulticastPacketMessage.REPORT);
-        group.addAddress(InetAddress.getLocalHost());
-
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         while (true) {
             try {
@@ -35,6 +30,7 @@ public class Main {
                     case "exit" -> {
                         MulticastReceiver.setContinueReading(false);
                         publisher.sendMessage(MulticastPacketMessage.LEAVE);
+                        publisher.closeSocket();
                         return;
                     }
                     case "show" -> group.show();
@@ -44,7 +40,6 @@ public class Main {
                 throw new RuntimeException(e);
             }
         }
-
     }
 
 }

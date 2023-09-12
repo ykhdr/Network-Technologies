@@ -1,6 +1,5 @@
 package ru.ykhdr.selfcopies;
 
-import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -9,29 +8,32 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-@AllArgsConstructor
+@NoArgsConstructor
 public class Group {
-    private final List<InetAddress> addresses;
+    private final List<String> users = new ArrayList<>();
 
-    public void addAddress(InetAddress address) {
-        if (addresses.contains(address)) {
+    public void addUser(InetAddress address, int port) {
+        String user = address.getHostAddress() + ":" + port;
+
+        if (users.contains(user)) {
             return;
         }
 
-        addresses.add(address);
-        System.out.println("User join : " + address.getHostName() + "\n");
+        users.add(user);
+        System.out.println("User join : " + user + "\n");
         show();
     }
 
-    public void deleteAddress(InetAddress address) {
-        addresses.remove(address);
-        System.out.println("User leave : " + address.getHostName() + "\n");
+    public void deleteUser(InetAddress address, int port) {
+        String user = address.getHostAddress() + ":" + port;
+        users.remove(user);
+        System.out.println("User leave : " + user +  "\n");
         show();
     }
 
     public void show() {
         System.out.println("Current users in group:");
-        addresses.forEach(address -> System.out.println("\tUser : " + address.getHostName()));
+        users.forEach(address -> System.out.println("\tUser : " + address));
         System.out.println();
     }
 }
