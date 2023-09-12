@@ -1,19 +1,17 @@
 package ru.ykhdr.selfcopies;
 
+import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
+import org.springframework.stereotype.Component;
+
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 
+@Component
+@AllArgsConstructor
 public class Group {
-    private final List<InetAddress> addresses = new ArrayList<>();
-    private static final Group INSTANCE = new Group();
-
-    private Group() {
-    }
-
-    public static Group getInstance() {
-        return INSTANCE;
-    }
+    private final List<InetAddress> addresses;
 
     public void addAddress(InetAddress address) {
         if (addresses.contains(address)) {

@@ -1,59 +1,50 @@
 package ru.ykhdr.selfcopies.multicast;
 
+import lombok.AllArgsConstructor;
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import org.jetbrains.annotations.NotNull;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 import ru.ykhdr.selfcopies.Group;
+import ru.ykhdr.selfcopies.config.MulticastConfig;
 
 import java.io.IOException;
 import java.net.*;
 
+@AllArgsConstructor
+@Component
 public class MulticastReceiver extends Thread {
-    private final MulticastSocket socket;
-    private final InetSocketAddress socketAddress;
-    private final NetworkInterface networkInterface;
-    private final MulticastPublisher publisher;
+    private final @NotNull MulticastSocket multicastSocket;
+    private final @NotNull InetSocketAddress socketAddress;
+    private final @NotNull NetworkInterface networkInterface;
+    private final @NotNull MulticastPublisher publisher;
+    private final @NotNull Group group;
     private final byte[] buf = new byte[256];
 
-    public MulticastReceiver(InetAddress group, MulticastPublisher publisher) {
-        this.publisher = publisher;
-        try {
-            socket = new MulticastSocket(MulticastConfig.PORT);
-            socketAddress = new InetSocketAddress(group, 8080);
-            networkInterface = NetworkInterface.getByInetAddress(group);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
+
+    public static volatile boolean continueReading = true;
 
     @Override
     public void run() {
         try {
-            socket.joinGroup(socketAddress, networkInterface);
-            while (MulticastConfig.continueReading) {
+            multicastSocket.joinGroup(socketAddress, networkInterface);
+            while (continueReading) {
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                socket.receive(packet);
+                multicastSocket.receive(packet);
                 String message = new String(packet.getData(), 0, packet.getLength());
 
                 System.out.println("Message received: " + message + ". From : " + packet.getAddress());
 
-                switch (message) {
-                    case MulticastPacketMessage.JOIN -> {
-                        Group.getInstance().addAddress(packet.getAddress());
-                        publisher.sendMessage(MulticastPacketMessage.HELLO);
-                    }
-                    case MulticastPacketMessage.EXIT -> Group.getInstance().deleteAddress(packet.getAddress());
-                    case MulticastPacketMessage.HELLO -> {
-                        if(!packet.getAddress().equals(InetAddress.getLocalHost())){
-                            Group.getInstance().addAddress(packet.getAddress());
-                        }
-                    }
-
-                    default -> {
-                    }
+                switch (Byte.parseByte(message)) {
+                    case MulticastPacketMessage.REPORT -> group.addAddress(packet.getAddress());
+                    case MulticastPacketMessage.LEAVE -> group.deleteAddress(packet.getAddress());
                 }
 
             }
 
-            socket.leaveGroup(socketAddress, networkInterface);
-            socket.close();
+            multicastSocket.leaveGroup(socketAddress, networkInterface);
+            multicastSocket.close();
 
         } catch (IOException e) {
             throw new RuntimeException(e);

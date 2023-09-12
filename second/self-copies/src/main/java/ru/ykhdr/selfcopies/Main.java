@@ -1,6 +1,9 @@
 package ru.ykhdr.selfcopies;
 
-import ru.ykhdr.selfcopies.multicast.MulticastConfig;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import ru.ykhdr.selfcopies.config.MulticastConfig;
+import ru.ykhdr.selfcopies.config.SpringConfig;
 import ru.ykhdr.selfcopies.multicast.MulticastPacketMessage;
 import ru.ykhdr.selfcopies.multicast.MulticastPublisher;
 import ru.ykhdr.selfcopies.multicast.MulticastReceiver;
@@ -8,34 +11,30 @@ import ru.ykhdr.selfcopies.multicast.MulticastReceiver;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.util.Optional;
+
 
 public class Main {
     public static void main(String[] args) throws UnknownHostException {
-        if (args.length < 1) {
-            System.err.println("Expected address argument");
-            return;
-        }
+        AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(SpringConfig.class);
 
-        Optional<InetAddress> inetAddressOptional = getInetAddress(args[0]);
+        Group group = ctx.getBean(Group.class);
 
-        if (inetAddressOptional.isEmpty()) {
-            System.out.println("Unknown group address");
-            return;
-        }
-
-        InetAddress inetAddress = inetAddressOptional.get();
-
-        MulticastPublisher publisher = new MulticastPublisher(inetAddress);
-        MulticastReceiver receiver = new MulticastReceiver(inetAddress, publisher);
+        MulticastPublisher publisher = ctx.getBean(MulticastPublisher.class);
+//        MulticastReceiver receiver = new MulticastReceiver(
+//                (MulticastSocket) ctx.getBean("multicastSocket"),
+//                (InetSocketAddress) ctx.getBean("socketAddress"),
+//                (NetworkInterface) ctx.getBean("networkInterface"),
+//                (MulticastPublisher) ctx.getBean("publisher"),
+//                group);
+        MulticastReceiver receiver = ctx.getBean(MulticastReceiver.class);
 
 
         receiver.start();
 
-        publisher.sendMessage(MulticastPacketMessage.JOIN);
-        Group.getInstance().addAddress(InetAddress.getLocalHost());
+        publisher.sendMessage(MulticastPacketMessage.REPORT);
+        group.addAddress(InetAddress.getLocalHost());
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         while (true) {
@@ -43,11 +42,11 @@ public class Main {
                 String command = reader.readLine();
                 switch (command) {
                     case "exit" -> {
-                        MulticastConfig.continueReading = false;
-                        publisher.sendMessage(MulticastPacketMessage.EXIT);
+                        MulticastReceiver.continueReading = false;
+                        publisher.sendMessage(MulticastPacketMessage.LEAVE);
                         return;
                     }
-                    case "show" -> Group.getInstance().show();
+                    case "show" -> group.show();
                 }
 
             } catch (IOException e) {
@@ -57,16 +56,4 @@ public class Main {
 
     }
 
-    static Optional<InetAddress> getInetAddress(String addressName) {
-        try {
-            InetAddress inetAddress = InetAddress.getByName(addressName);
-            if (inetAddress.isMulticastAddress()) {
-                return Optional.of(inetAddress);
-            }
-
-        } catch (UnknownHostException ignored) {
-        }
-
-        return Optional.empty();
-    }
 }
