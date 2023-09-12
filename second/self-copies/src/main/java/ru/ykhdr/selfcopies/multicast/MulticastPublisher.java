@@ -1,5 +1,6 @@
 package ru.ykhdr.selfcopies.multicast;
 
+import org.springframework.context.annotation.PropertySource;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -11,6 +12,7 @@ import java.net.SocketException;
 
 
 @Component
+@PropertySource("classpath:multicast.properties")
 public class MulticastPublisher {
 
     private final InetAddress group;
@@ -42,7 +44,7 @@ public class MulticastPublisher {
         socket.close();
     }
 
-    @Scheduled(fixedDelay = 5000)
+    @Scheduled(fixedDelayString = "${multicast.scheduled.send.delay}")
     public void sendReportScheduledTask(){
         sendMessage(MulticastPacketMessage.REPORT);
     }

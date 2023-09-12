@@ -1,6 +1,7 @@
 package ru.ykhdr.selfcopies;
 
 import lombok.NoArgsConstructor;
+import org.springframework.context.annotation.PropertySource;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -9,8 +10,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-@Component
 @NoArgsConstructor
+@Component
+@PropertySource("classpath:group.properties")
 public class Group {
     private final Set<String> users = new HashSet<>();
     private final Set<String> activeUsers = new HashSet<>();
@@ -32,7 +34,7 @@ public class Group {
         synchronized (users) {
             users.remove(user);
         }
-        synchronized (activeUsers){
+        synchronized (activeUsers) {
             activeUsers.remove(user);
         }
 
@@ -49,8 +51,9 @@ public class Group {
         System.out.println();
     }
 
-    @Scheduled(fixedRate = 10000, initialDelay = 7000)
-    public void removeInactiveUsers() {
+    @Scheduled(fixedDelayString = "${group.scheduled.update.fixedDelay}",
+            initialDelayString = "${group.scheduled.update.initialDelay}")
+    public void updateActiveUsers() {
         List<String> newUsers;
         List<String> leavedUsers;
         synchronized (users) {

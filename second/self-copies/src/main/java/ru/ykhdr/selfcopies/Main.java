@@ -12,11 +12,11 @@ import java.io.InputStreamReader;
 
 
 public class Main {
-    public static void main(String[] args){
+    public static void main(String[] args) {
         AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext(SpringConfig.class);
 
-        Group group = ctx.getBean(Group.class);
 
+        Group group = ctx.getBean(Group.class);
         MulticastPublisher publisher = ctx.getBean(MulticastPublisher.class);
         MulticastReceiver receiver = ctx.getBean(MulticastReceiver.class);
 
@@ -31,6 +31,7 @@ public class Main {
                         MulticastReceiver.setContinueReading(false);
                         publisher.sendMessage(MulticastPacketMessage.LEAVE);
                         publisher.closeSocket();
+
                         return;
                     }
                     case "show" -> group.show();

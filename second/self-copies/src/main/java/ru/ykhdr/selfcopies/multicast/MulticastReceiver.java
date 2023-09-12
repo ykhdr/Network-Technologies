@@ -35,11 +35,12 @@ public class MulticastReceiver extends Thread {
                 multicastSocket.receive(packet);
                 byte message = packet.getData()[0];
 
-                System.out.println("Message received: " + message + ". From : " + packet.getAddress());
+                System.out.println("Message received: " + message + ". From : " +
+                        packet.getAddress().getCanonicalHostName() + ":" + packet.getPort());
 
                 switch (message) {
-                    case MulticastPacketMessage.REPORT -> group.addUser(packet.getAddress(),packet.getPort());
-                    case MulticastPacketMessage.LEAVE -> group.deleteUser(packet.getAddress(),packet.getPort() );
+                    case MulticastPacketMessage.REPORT -> group.addUser(packet.getAddress(), packet.getPort());
+                    case MulticastPacketMessage.LEAVE -> group.deleteUser(packet.getAddress(), packet.getPort());
                 }
 
             }
