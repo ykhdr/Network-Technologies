@@ -33,11 +33,11 @@ public class MulticastReceiver extends Thread {
             while (continueReading) {
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
                 multicastSocket.receive(packet);
-                String message = new String(packet.getData(), 0, packet.getLength());
+                byte message = packet.getData()[0];
 
                 System.out.println("Message received: " + message + ". From : " + packet.getAddress());
 
-                switch (Byte.parseByte(message)) {
+                switch (message) {
                     case MulticastPacketMessage.REPORT -> group.addAddress(packet.getAddress());
                     case MulticastPacketMessage.LEAVE -> group.deleteAddress(packet.getAddress());
                 }

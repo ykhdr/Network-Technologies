@@ -1,8 +1,6 @@
 package ru.ykhdr.selfcopies;
 
-import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
-import ru.ykhdr.selfcopies.config.MulticastConfig;
 import ru.ykhdr.selfcopies.config.SpringConfig;
 import ru.ykhdr.selfcopies.multicast.MulticastPacketMessage;
 import ru.ykhdr.selfcopies.multicast.MulticastPublisher;
@@ -11,8 +9,8 @@ import ru.ykhdr.selfcopies.multicast.MulticastReceiver;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.net.*;
-import java.util.Optional;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 
 
 public class Main {
@@ -22,14 +20,7 @@ public class Main {
         Group group = ctx.getBean(Group.class);
 
         MulticastPublisher publisher = ctx.getBean(MulticastPublisher.class);
-//        MulticastReceiver receiver = new MulticastReceiver(
-//                (MulticastSocket) ctx.getBean("multicastSocket"),
-//                (InetSocketAddress) ctx.getBean("socketAddress"),
-//                (NetworkInterface) ctx.getBean("networkInterface"),
-//                (MulticastPublisher) ctx.getBean("publisher"),
-//                group);
         MulticastReceiver receiver = ctx.getBean(MulticastReceiver.class);
-
 
         receiver.start();
 
