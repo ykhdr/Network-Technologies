@@ -1,34 +1,35 @@
 package ru.ykhdr.selfcopies.multicast;
 
 import lombok.AllArgsConstructor;
-import lombok.NoArgsConstructor;
-import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.Setter;
 import org.jetbrains.annotations.NotNull;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import ru.ykhdr.selfcopies.Group;
-import ru.ykhdr.selfcopies.config.MulticastConfig;
 
 import java.io.IOException;
-import java.net.*;
+import java.net.DatagramPacket;
+import java.net.InetSocketAddress;
+import java.net.MulticastSocket;
+import java.net.NetworkInterface;
 
 @AllArgsConstructor
 @Component
 public class MulticastReceiver extends Thread {
     private final @NotNull MulticastSocket multicastSocket;
     private final @NotNull InetSocketAddress socketAddress;
-    private final @NotNull NetworkInterface networkInterface;
-    private final @NotNull MulticastPublisher publisher;
     private final @NotNull Group group;
+
     private final byte[] buf = new byte[256];
 
-
-    public static volatile boolean continueReading = true;
+    @Setter
+    @Getter
+    private static volatile boolean continueReading = true;
 
     @Override
     public void run() {
         try {
-            multicastSocket.joinGroup(socketAddress, networkInterface);
+            multicastSocket.joinGroup(socketAddress, NetworkInterface.getByInetAddress(socketAddress.getAddress()));
             while (continueReading) {
                 DatagramPacket packet = new DatagramPacket(buf, buf.length);
                 multicastSocket.receive(packet);
@@ -43,7 +44,7 @@ public class MulticastReceiver extends Thread {
 
             }
 
-            multicastSocket.leaveGroup(socketAddress, networkInterface);
+            multicastSocket.leaveGroup(socketAddress, NetworkInterface.getByInetAddress(socketAddress.getAddress()));
             multicastSocket.close();
 
         } catch (IOException e) {

@@ -3,6 +3,7 @@ package ru.ykhdr.selfcopies.config;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.core.env.Environment;
@@ -15,7 +16,7 @@ import java.util.Objects;
 @Getter
 @Configuration
 @PropertySource("classpath:multicast.properties")
-public class MulticastConfig {
+public class MulticastConfig{
     private final Environment environment;
 
     @Bean
@@ -36,12 +37,6 @@ public class MulticastConfig {
         }
 
         return group;
-    }
-
-    @Bean
-    public NetworkInterface networkInterface() throws UnknownHostException, SocketException {
-        System.out.println("he");
-        return NetworkInterface.getByInetAddress(groupAddress());
     }
 
     @Bean

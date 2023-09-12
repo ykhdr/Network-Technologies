@@ -3,7 +3,6 @@ package ru.ykhdr.selfcopies.multicast;
 import lombok.AllArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import ru.ykhdr.selfcopies.config.MulticastConfig;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -30,4 +29,8 @@ public class MulticastPublisher {
         }
     }
 
+    @Scheduled(fixedDelay = 5000)
+    public void sendReportScheduledTask(){
+        sendMessage(MulticastPacketMessage.REPORT);
+    }
 }

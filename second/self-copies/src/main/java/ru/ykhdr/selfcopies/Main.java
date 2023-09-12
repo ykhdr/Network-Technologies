@@ -42,7 +42,7 @@ public class Main {
                 String command = reader.readLine();
                 switch (command) {
                     case "exit" -> {
-                        MulticastReceiver.continueReading = false;
+                        MulticastReceiver.setContinueReading(false);
                         publisher.sendMessage(MulticastPacketMessage.LEAVE);
                         return;
                     }
