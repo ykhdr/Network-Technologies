@@ -31,7 +31,7 @@ public class Main {
                         MulticastReceiver.setContinueReading(false);
                         publisher.sendMessage(MulticastPacketMessage.LEAVE);
                         publisher.closeSocket();
-
+                        ctx.close();
                         return;
                     }
                     case "show" -> group.show();
