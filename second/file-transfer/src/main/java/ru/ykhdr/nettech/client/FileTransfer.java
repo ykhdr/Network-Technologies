@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import ru.ykhdr.nettech.core.messages.InitialPacket;
 
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -20,7 +21,7 @@ public class FileTransfer {
     private final Socket socket;
     private final String filePath;
     private static final short TITLE_MAX_LENGTH = 4096;
-    private static final int TCP_DATA_LENGTH = 65535;
+    private static final int TCP_DATA_LENGTH = 655035;
     private final ByteBuffer byteBuffer = ByteBuffer.allocate(TCP_DATA_LENGTH);
 
     public void sendFile() {
@@ -33,7 +34,7 @@ public class FileTransfer {
         Path file = fileOptional.get();
 
         Optional<InitialPacket> initialPacketOpt = fillInitialPacket(file);
-        if(initialPacketOpt.isEmpty()){
+        if (initialPacketOpt.isEmpty()) {
             log.error("Canceled sending file");
             return;
         }
@@ -43,20 +44,24 @@ public class FileTransfer {
 
     }
 
-    private void transferFile(Path file){
+    private void transferFile(Path file) {
         try (DataOutputStream sos = new DataOutputStream(socket.getOutputStream());
              DataInputStream fis = new DataInputStream(Files.newInputStream(file));
              socket) {
 
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+
             int bytesRead;
             // Initial package
             sos.write(byteBuffer.array());
-            sos.flush();
             byteBuffer.clear();
 
+            sos.flush();
+            byte[] arr = new byte[8192];
+
             //TODO проверить работает ли без очистки
-            while ((bytesRead = fis.read(byteBuffer.array())) != -1){
-                sos.write(byteBuffer.array(),0, bytesRead);
+            while ((bytesRead = fis.read(arr)) != -1) {
+                sos.write(arr, 0, bytesRead);
             }
 
             socket.close();
@@ -67,15 +72,30 @@ public class FileTransfer {
         }
     }
 
-    private void fillByteBufferWithInitialPacketData(InitialPacket initialPacket){
-        byteBuffer.putShort(initialPacket.titleSize());
-        byteBuffer.put(initialPacket.fileName().getBytes(StandardCharsets.UTF_8));
-        byteBuffer.putLong(initialPacket.dataSize());
+    private void fillByteBufferWithInitialPacketData(InitialPacket initialPacket) {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            baos.write((byte) ((initialPacket.titleSize() >> 8) & 0xff));
+            baos.write((byte) (initialPacket.titleSize() & 0xff));
+
+            baos.write(initialPacket.fileName().getBytes());
+
+            baos.write((byte) ((initialPacket.dataSize() >> 56) & 0xff));
+            baos.write((byte) ((initialPacket.dataSize() >> 48) & 0xff));
+            baos.write((byte) ((initialPacket.dataSize() >> 40) & 0xff));
+            baos.write((byte) ((initialPacket.dataSize() >> 32) & 0xff));
+            baos.write((byte) ((initialPacket.dataSize() >> 24) & 0xff));
+            baos.write((byte) ((initialPacket.dataSize() >> 16) & 0xff));
+            baos.write((byte) ((initialPacket.dataSize() >> 8) & 0xff));
+            baos.write((byte) (initialPacket.dataSize() & 0xff));
+            byteBuffer.put(baos.toByteArray());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private Optional<InitialPacket> fillInitialPacket(Path file) {
         Path fileName = file.getFileName();
-        int nameSize = fileName.getNameCount();
+        int nameSize = fileName.toString().length();
 
         if (nameSize > TITLE_MAX_LENGTH) {
             log.warn("File title is longer than allowed (max size - 4096 bytes)");
