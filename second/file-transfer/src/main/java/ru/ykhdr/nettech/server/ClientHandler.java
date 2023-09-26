@@ -1,5 +1,6 @@
 package ru.ykhdr.nettech.server;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import ru.ykhdr.nettech.core.messages.InitialPacket;
@@ -8,8 +9,8 @@ import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -17,10 +18,15 @@ public class ClientHandler implements Runnable {
     private final Socket clientSocket;
     private static final int BUFFER_SIZE = 655035;
     private static final String UPLOAD_DIR = "uploads";
+    private final AtomicLong totalBytesRead = new AtomicLong();
+
+    @Getter
+    private Boolean isReceivingStopped = false;
+
     @Override
     public void run() {
-
         log.info("Start receive file from Client " + clientSocket.getInetAddress().getHostAddress());
+
         try (clientSocket;
              InputStream dis = clientSocket.getInputStream()) {
             byte[] buffer = new byte[BUFFER_SIZE];
@@ -29,34 +35,49 @@ public class ClientHandler implements Runnable {
             InitialPacket initialPacket = collectInitialPacket(buffer);
             Optional<Path> filePathOpt = getFileToWrite(initialPacket);
 
-            if(filePathOpt.isEmpty()){
+            if (filePathOpt.isEmpty()) {
                 log.info("Client socket close");
                 return;
             }
 
             Path filePath = filePathOpt.get();
 
+            SpeedRecorder speedRecorder = new SpeedRecorder(
+                    initialPacket.dataSize(),
+                    this::getBytesRead,
+                    this::getIsReceivingStopped,
+                    initialPacket.fileName());
+
+            Thread thread = new Thread(speedRecorder);
+            thread.start();
+            long startTime = System.currentTimeMillis();
+
             try (BufferedOutputStream fos = new BufferedOutputStream(Files.newOutputStream(filePath))) {
                 int bytesRead;
-                long totalBytesRead = 0;
 
                 while ((bytesRead = dis.read(buffer)) != -1) {
                     fos.write(buffer, 0, bytesRead);
-                    System.out.println(new String(Arrays.copyOfRange(buffer, 0, bytesRead)));
-                    totalBytesRead += bytesRead;
+                    totalBytesRead.addAndGet(bytesRead);
                 }
 
-                System.out.println(totalBytesRead);
             } catch (IOException e) {
-                log.error("Error writing file", e);
+                log.error("Error writing file " + filePath.getFileName().toString(), e);
+                isReceivingStopped = true;
+                return;
             }
 
+            long endTime = System.currentTimeMillis();
+            long receivingTime = (endTime-startTime) / 1000;
+
             log.info("Received file from Client " + clientSocket.getInetAddress().getHostAddress());
+            log.info("Average speed: " + speedRecorder.getAverageSpeed(receivingTime));
         } catch (IOException e) {
             log.error("Client Handler of client " + clientSocket.getInetAddress().getHostAddress() + " error", e);
         }
 
-        log.info("Client " + clientSocket.getInetAddress().getHostAddress() + "sent all data");
+        isReceivingStopped = true;
+        log.info("Client " + clientSocket.getInetAddress().getHostAddress() + " sent all data. Closing connection");
+
     }
 
     private Optional<Path> getFileToWrite(InitialPacket initialPacket) {
@@ -102,7 +123,9 @@ public class ClientHandler implements Runnable {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
 
-
+    public long getBytesRead() {
+        return totalBytesRead.get();
     }
 }

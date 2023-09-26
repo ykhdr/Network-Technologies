@@ -19,6 +19,7 @@ public class FileTransfer {
     private final Socket socket;
     private final String filePath;
     private static final short TITLE_MAX_LENGTH = 4096;
+    private static final int BUFFER_SIZE = 8192;
 
     public void sendFile() {
         Optional<Path> fileOptional = getFile(filePath);
@@ -43,25 +44,18 @@ public class FileTransfer {
         try (DataOutputStream sos = new DataOutputStream(socket.getOutputStream());
              DataInputStream fis = new DataInputStream(Files.newInputStream(file));
              socket) {
-
-            byte[] bytes = fillByteBufferWithInitialPacketData(initialPacket);
+            byte[] initialPacketData = fillByteBufferWithInitialPacketData(initialPacket);
+            byte[] buffer = new byte[BUFFER_SIZE];
 
             int bytesRead;
-            // Initial package
 
-            sos.write(bytes, 0, bytes.length);
-
+            sos.write(initialPacketData, 0, initialPacketData.length);
             sos.flush();
-            byte[] arr = new byte[8192];
 
-            //TODO проверить работает ли без очистки
-            while ((bytesRead = fis.read(arr)) != -1) {
-                sos.write(arr, 0, bytesRead);
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                sos.write(buffer, 0, bytesRead);
                 sos.flush();
-                System.out.println(bytesRead);
             }
-
-            socket.close();
 
             log.info("Successful sent file");
         } catch (IOException e) {
