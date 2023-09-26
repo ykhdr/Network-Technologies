@@ -28,10 +28,11 @@ public class ClientHandler implements Runnable {
         log.info("Start receive file from Client " + clientSocket.getInetAddress().getHostAddress());
 
         try (clientSocket;
-             InputStream dis = clientSocket.getInputStream()) {
+             InputStream sis = clientSocket.getInputStream()) {
             byte[] buffer = new byte[BUFFER_SIZE];
 
-            dis.read(buffer);
+            sis.read(buffer);
+
             InitialPacket initialPacket = collectInitialPacket(buffer);
             Optional<Path> filePathOpt = getFileToWrite(initialPacket);
 
@@ -55,8 +56,9 @@ public class ClientHandler implements Runnable {
             try (BufferedOutputStream fos = new BufferedOutputStream(Files.newOutputStream(filePath))) {
                 int bytesRead;
 
-                while ((bytesRead = dis.read(buffer)) != -1) {
+                while ((bytesRead = sis.read(buffer)) != -1) {
                     fos.write(buffer, 0, bytesRead);
+                    fos.flush();
                     totalBytesRead.addAndGet(bytesRead);
                 }
 
