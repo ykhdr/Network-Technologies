@@ -70,7 +70,7 @@ public class ClientHandler implements Runnable {
             long receivingTime = (endTime-startTime) / 1000;
 
             log.info("Received file from Client " + clientSocket.getInetAddress().getHostAddress());
-            log.info("Average speed: " + speedRecorder.getAverageSpeed(receivingTime));
+            log.info("Average speed:\t\t" + speedRecorder.getAverageSpeed(receivingTime));
         } catch (IOException e) {
             log.error("Client Handler of client " + clientSocket.getInetAddress().getHostAddress() + " error", e);
         }

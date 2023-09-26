@@ -24,8 +24,9 @@ public class SpeedRecorder implements Runnable {
                 bytesReadCurrent = getCurBytesRead.get();
                 long dif = bytesReadCurrent - bytesReadBefore;
 
-                log.info("Data retrieval speed of file " + clientName + " is " + countMbPerSecond(dif));
+                log.info("Data retrieval speed of file " + clientName + " is\t\t" + countMbPerSecond(dif));
 
+                bytesReadBefore = bytesReadCurrent;
                 Thread.sleep(3000);
             }
         } catch (InterruptedException e) {
@@ -34,10 +35,10 @@ public class SpeedRecorder implements Runnable {
     }
 
     private String countMbPerSecond(long bytesPerThreeSeconds) {
-        return String.format("%10.1f", (double) bytesPerThreeSeconds / 3 / 1024 / 1024);
+        return String.format("%.1f Mb/s", (double) bytesPerThreeSeconds / 3 / 1024 / 1024);
     }
 
     public String getAverageSpeed(long seconds) {
-        return String.format("%10.1f", (double) dataSize / seconds / 1024 / 1024);
+        return String.format("%.1f Mb/s", (double) dataSize / seconds / 1024 / 1024);
     }
 }

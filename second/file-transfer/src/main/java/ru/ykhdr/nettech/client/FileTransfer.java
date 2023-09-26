@@ -52,6 +52,7 @@ public class FileTransfer {
             sos.write(initialPacketData, 0, initialPacketData.length);
             sos.flush();
 
+            log.info("Start sending file");
             while ((bytesRead = fis.read(buffer)) != -1) {
                 sos.write(buffer, 0, bytesRead);
                 sos.flush();
