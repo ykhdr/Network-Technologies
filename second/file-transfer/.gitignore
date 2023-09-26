@@ -3,6 +3,9 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+### Uploads dir ###
+uploads
+
 ### IntelliJ IDEA ###
 .idea
 .idea/modules.xml

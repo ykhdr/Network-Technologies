@@ -6,65 +6,47 @@ import ru.ykhdr.nettech.core.messages.InitialPacket;
 
 import java.io.*;
 import java.net.Socket;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Optional;
 
 @Slf4j
 @RequiredArgsConstructor
 public class ClientHandler implements Runnable {
     private final Socket clientSocket;
-    private static final int BUFFER_SIZE = 1000;
+    private static final int BUFFER_SIZE = 655035;
     private static final String UPLOAD_DIR = "uploads";
-    private long allBytesRead;
-
     @Override
     public void run() {
-        final ByteBuffer byteBuffer = ByteBuffer.allocate(BUFFER_SIZE);
+
         log.info("Start receive file from Client " + clientSocket.getInetAddress().getHostAddress());
         try (clientSocket;
-             BufferedInputStream dis = new BufferedInputStream(clientSocket.getInputStream());
-             DataOutputStream dos = new DataOutputStream(clientSocket.getOutputStream())) {
+             InputStream dis = clientSocket.getInputStream()) {
+            byte[] buffer = new byte[BUFFER_SIZE];
 
-            dis.read(byteBuffer.array());
-            // Чтение данных о файле
-            InitialPacket initialPacket = collectInitialPacket(byteBuffer);
-            String fileName = initialPacket.fileName();
-            long fileSize = initialPacket.dataSize();
+            dis.read(buffer);
+            InitialPacket initialPacket = collectInitialPacket(buffer);
+            Optional<Path> filePathOpt = getFileToWrite(initialPacket);
 
-            System.out.println(fileName);
-
-            Path uploadDir = Path.of(UPLOAD_DIR);
-            if (!Files.exists(uploadDir)) {
-                try {
-                    Files.createDirectories(uploadDir);
-                } catch (IOException e){
-                    log.error("Uploads dir creation error",e);
-                }
+            if(filePathOpt.isEmpty()){
+                log.info("Client socket close");
+                return;
             }
 
-            Path filePath = uploadDir.resolve(fileName);
+            Path filePath = filePathOpt.get();
 
-            try{
-                Files.createFile(filePath);
-                System.out.println("File \"" + fileName +"\" created");
-            } catch (IOException e){
-                log.error("Client File creation error",e);
-//                return;
-            }
-            byte[] fileBuffer = new byte[BUFFER_SIZE];
-
-            // Создание файла для записи данных
             try (BufferedOutputStream fos = new BufferedOutputStream(Files.newOutputStream(filePath))) {
                 int bytesRead;
                 long totalBytesRead = 0;
 
-                // Чтение данных файла и запись их в файл
-                while (totalBytesRead < fileSize && (bytesRead = dis.read(fileBuffer)) != -1) {
-                    fos.write(fileBuffer, 0, bytesRead);
+                while ((bytesRead = dis.read(buffer)) != -1) {
+                    fos.write(buffer, 0, bytesRead);
+                    System.out.println(new String(Arrays.copyOfRange(buffer, 0, bytesRead)));
                     totalBytesRead += bytesRead;
                 }
+
+                System.out.println(totalBytesRead);
             } catch (IOException e) {
                 log.error("Error writing file", e);
             }
@@ -77,12 +59,50 @@ public class ClientHandler implements Runnable {
         log.info("Client " + clientSocket.getInetAddress().getHostAddress() + "sent all data");
     }
 
-    private InitialPacket collectInitialPacket(ByteBuffer byteBuffer){
-        short titleSize = byteBuffer.getShort();
-        byte[] fileName = new byte[titleSize];
-        byteBuffer.get(fileName,0,titleSize);
-        long dataSize = byteBuffer.getLong();
+    private Optional<Path> getFileToWrite(InitialPacket initialPacket) {
+        String fileName = initialPacket.fileName();
 
-        return new InitialPacket(titleSize,new String(fileName),dataSize);
+        Path uploadDir = Path.of(UPLOAD_DIR);
+        if (!Files.exists(uploadDir)) {
+            try {
+                Files.createDirectories(uploadDir);
+            } catch (IOException e) {
+                log.error("Uploads dir creation error", e);
+                return Optional.empty();
+            }
+        }
+
+        Path filePath = uploadDir.resolve(fileName);
+
+        if (!Files.exists(filePath)) {
+            try {
+                Files.createFile(filePath);
+            } catch (IOException e) {
+                log.error("Client File creation error", e);
+                return Optional.empty();
+            }
+        }
+
+        log.info("File \"" + fileName + "\" created");
+
+        return Optional.of(filePath);
+    }
+
+    private InitialPacket collectInitialPacket(byte[] bytes) {
+        try (DataInputStream dataInputStream = new DataInputStream(new ByteArrayInputStream(bytes));
+             DataOutputStream os = new DataOutputStream(new ByteArrayOutputStream(1))) {
+            dataInputStream.transferTo(os);
+            dataInputStream.reset();
+
+            short titleSize = dataInputStream.readShort();
+            byte[] fileName = new byte[titleSize];
+            dataInputStream.readFully(fileName);
+            long dataSize = dataInputStream.readLong();
+            return new InitialPacket(titleSize, new String(fileName), dataSize, 0);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+
     }
 }

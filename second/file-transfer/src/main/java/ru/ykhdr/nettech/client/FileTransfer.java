@@ -9,8 +9,6 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -21,8 +19,6 @@ public class FileTransfer {
     private final Socket socket;
     private final String filePath;
     private static final short TITLE_MAX_LENGTH = 4096;
-    private static final int TCP_DATA_LENGTH = 655035;
-    private final ByteBuffer byteBuffer = ByteBuffer.allocate(TCP_DATA_LENGTH);
 
     public void sendFile() {
         Optional<Path> fileOptional = getFile(filePath);
@@ -39,22 +35,21 @@ public class FileTransfer {
             return;
         }
 
-        fillByteBufferWithInitialPacketData(initialPacketOpt.get());
-        transferFile(file);
+        transferFile(file, initialPacketOpt.get());
 
     }
 
-    private void transferFile(Path file) {
+    private void transferFile(Path file, InitialPacket initialPacket) {
         try (DataOutputStream sos = new DataOutputStream(socket.getOutputStream());
              DataInputStream fis = new DataInputStream(Files.newInputStream(file));
              socket) {
 
-            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            byte[] bytes = fillByteBufferWithInitialPacketData(initialPacket);
 
             int bytesRead;
             // Initial package
-            sos.write(byteBuffer.array());
-            byteBuffer.clear();
+
+            sos.write(bytes, 0, bytes.length);
 
             sos.flush();
             byte[] arr = new byte[8192];
@@ -62,6 +57,8 @@ public class FileTransfer {
             //TODO проверить работает ли без очистки
             while ((bytesRead = fis.read(arr)) != -1) {
                 sos.write(arr, 0, bytesRead);
+                sos.flush();
+                System.out.println(bytesRead);
             }
 
             socket.close();
@@ -72,22 +69,14 @@ public class FileTransfer {
         }
     }
 
-    private void fillByteBufferWithInitialPacketData(InitialPacket initialPacket) {
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            baos.write((byte) ((initialPacket.titleSize() >> 8) & 0xff));
-            baos.write((byte) (initialPacket.titleSize() & 0xff));
+    private byte[] fillByteBufferWithInitialPacketData(InitialPacket initialPacket) {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+             DataOutputStream dataOutputStream = new DataOutputStream(baos)) {
+            dataOutputStream.writeShort(initialPacket.titleSize());
+            dataOutputStream.writeBytes(initialPacket.fileName());
+            dataOutputStream.writeLong(initialPacket.dataSize());
 
-            baos.write(initialPacket.fileName().getBytes());
-
-            baos.write((byte) ((initialPacket.dataSize() >> 56) & 0xff));
-            baos.write((byte) ((initialPacket.dataSize() >> 48) & 0xff));
-            baos.write((byte) ((initialPacket.dataSize() >> 40) & 0xff));
-            baos.write((byte) ((initialPacket.dataSize() >> 32) & 0xff));
-            baos.write((byte) ((initialPacket.dataSize() >> 24) & 0xff));
-            baos.write((byte) ((initialPacket.dataSize() >> 16) & 0xff));
-            baos.write((byte) ((initialPacket.dataSize() >> 8) & 0xff));
-            baos.write((byte) (initialPacket.dataSize() & 0xff));
-            byteBuffer.put(baos.toByteArray());
+            return baos.toByteArray();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -112,7 +101,9 @@ public class FileTransfer {
             return Optional.empty();
         }
 
-        return Optional.of(new InitialPacket((short) nameSize, fileNameStr, fileSize));
+        int packetSize = 2 + fileNameStr.length() + 8;
+
+        return Optional.of(new InitialPacket((short) nameSize, fileNameStr, fileSize, packetSize));
     }
 
     private Optional<Path> getFile(String filePath) {
