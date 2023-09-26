@@ -67,10 +67,20 @@ public class ClientHandler implements Runnable {
             }
 
             long endTime = System.currentTimeMillis();
-            long receivingTime = (endTime-startTime) / 1000;
+            long receivingTime = (endTime - startTime) / 1000;
 
             log.info("Received file from Client " + clientSocket.getInetAddress().getHostAddress());
             log.info("Average speed:\t\t" + speedRecorder.getAverageSpeed(receivingTime));
+
+            if (totalBytesRead.get() != initialPacket.dataSize()) {
+                log.warn("""
+                        Total received file's length does not equal to length of the sent file:
+                            Received: %d bytes
+                            Sent: %d bytes
+                        """
+                        .formatted(totalBytesRead.get(), initialPacket.dataSize()));
+            }
+
         } catch (IOException e) {
             log.error("Client Handler of client " + clientSocket.getInetAddress().getHostAddress() + " error", e);
         }
