@@ -83,6 +83,7 @@ public class ClientHandler implements Runnable {
                         .formatted(totalBytesRead.get(), initialPacket.dataSize()));
             }
 
+
         } catch (IOException e) {
             log.error("Client Handler of client " + clientSocket.getInetAddress().getHostAddress() + " error", e);
         }

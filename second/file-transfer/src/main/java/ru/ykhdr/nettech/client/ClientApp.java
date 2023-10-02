@@ -15,6 +15,7 @@ public class ClientApp {
             log.warn("Client shutdown");
             return;
         }
+
         log.info("Successful arguments passed");
 
         ClientInfo clientInfo = clientInfoOp.get();
