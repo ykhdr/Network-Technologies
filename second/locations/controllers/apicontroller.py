@@ -1,5 +1,6 @@
 import string
 import os
+import struct
 
 from api.request import get_request
 
@@ -11,8 +12,15 @@ class ApiController:
         self._interesting_places_controller = _InterestingPlacesController()
         self._description_places_controller = _DescriptionPlacesController()
 
-    def find_places(self, name: string):
-        return self._location_controller.find_places(name)
+    async def find_locations(self, name: string):
+        return (await self._location_controller.find_locations(name))['hits']
+
+    async def find_weather_and_interesting_places(self, location):
+        lat = location['point']['lat']
+        lon = location['point']['lng']
+        weather = self._weather_controller.find_weather(lat, lon)
+
+        return await weather, 0
 
 
 class _InterestingPlacesController:
@@ -23,10 +31,7 @@ class _InterestingPlacesController:
 class _LocationController:
     _url = 'https://graphhopper.com/api/1/geocode'
 
-    def __init__(self):
-        self._latest_places = {}
-
-    async def find_places(self, name: string):
+    def find_locations(self, name: string):
         query = {
             "q": name,
             "locale": "en",
@@ -38,14 +43,21 @@ class _LocationController:
             "key": os.getenv('LOCATION_KEY')
         }
 
-        places = (await get_request(self._url, query))['hits']
-        self._latest_places = places
-        return places
+        return get_request(self._url, query)
 
 
 class _WeatherController:
-    def __init__(self):
-        self._url = 'https://api.openweathermap.org/data/2.5/weather'
+    _url = 'https://api.openweathermap.org/data/2.5/weather'
+
+    def find_weather(self, lat, lon):
+        query = {
+            "lat": lat,
+            "lon": lon,
+            "units": "metric",
+            "appid": os.getenv('WEATHER_KEY')
+        }
+
+        return get_request(self._url, query)
 
 
 class _DescriptionPlacesController:
