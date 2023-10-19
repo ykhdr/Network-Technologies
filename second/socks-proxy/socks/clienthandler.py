@@ -1,13 +1,24 @@
 import socket
 import select
-a
-# SERVER CONFIG
+from struct import unpack
+
+# CONFIG
 SERVER_PORT = 1080
 SERVER_ADDRESS = '0.0.0.0'
+
+DNS_PORT = 53
+DNS_ADDRESS = '8.8.8.8'
 
 # PROTOCOL PARAMETERS
 VER = b'\x05'
 '''Protocol version'''
+
+RSV = b'\x00'
+'''Reserved, must be 0x00'''
+
+# Only available at this program
+CMD_ESTABLISH_TCPIP = b'\x01'
+'''Command code of establish a TCP/IP stream connection'''
 
 # Only no auth possible now
 M_NOAUTH = b'\x00'
@@ -16,10 +27,21 @@ M_NOAUTH = b'\x00'
 M_NOTAVAILABLE = b'\xff'
 '''Requested methods are not available'''
 
-DTYPE_IPV4 = b'\x01'
+# STATUS CODE
+ST_REQUEST_GRANTED = b'\x00'
+'''Status request granted'''''
+
+ST_GENERAL_FAILURE = b'\x01'
+'''Status general failure'''
+
+ST_PROTOCOL_ERROR = b'\x07'
+'''Status command not supported / protocol error'''
+
+# DEFAULT TYPES
+ATYPE_IPV4 = b'\x01'
 '''IPv4 address (01)'''
 
-DTYPE_DOMAIN_NAME = b'\x03'
+ATYPE_DOMAINNAME = b'\x03'
 '''Domain name (03)'''
 
 # UTILS
@@ -51,17 +73,67 @@ def accept_new_client(client, data):
     return True if method == M_NOTAVAILABLE else False
 
 
-def client_connection_request(client, data):
+# def client_connection_request(message):
+
+
+def accept_client_connection(message):
+    f"""
+    return dst_addr, dst_port, status \n
+    exception {SyntaxError} if error in message syntax
+    """
+    #   +-----+-----+-------+------+----------+----------+
+    #   | VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+    #   +-----+-----+-------+------+----------+----------+
     # TODO проверить на правильность сообщения о запросе подключения и в случае успеха совершить подключение и
-    #  вернуть сокет
-    pass
+    #      вернуть сокет
+
+    # TODO проверить на длину сообщения  (minimum посчитать) или же сделать обработку ошибки
+
+    if (
+            VER != message[0:1] or
+            CMD_ESTABLISH_TCPIP != message[1:2] or
+            RSV != message[2:3]
+    ):
+        return None
+        return None, None, ST_PROTOCOL_ERROR
+
+    if message[3:4] == ATYPE_IPV4:
+        return ATYPE_IPV4
+
+        dst_addr = socket.inet_ntoa(message[4:-2])
+        dst_port = unpack('>H', message[8:])[0]
+    elif message[3:4] == ATYPE_DOMAINNAME:
+        return ATYPE_DOMAINNAME
+        domain_length = message[4]
+        # TODO протестить правильно ли работает
+        domain_name = message[5:5 + domain_length]
+        dst_addr = resolve_domain_name(domain_name)
+        dst_port = unpack('>H', message[5 + domain_length:len(message)])[0]
+    else:
+        return None, None, ST_PROTOCOL_ERROR
+
+    return dst_addr, dst_port, ST_REQUEST_GRANTED
+
+
+def resolve_domain_name(message):
+    domain_length = message[4]
+    # TODO протестить правильно ли работает
+    domain_name = message[5:5 + domain_length]
+    dst_port = unpack('>H', message[5 + domain_length:len(message)])[0]
+
+    return domain_name, dst_port
+
+def create_dns_query(domain_name):
+    return  b'\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00' + domain_name.encode('utf-8') + b'\x00\x00\x01\x00\x01'
 
 
 def handle_clients():
     server = init_server()
+    dns = init_dns()
     clients = []
-    clients_with_destination = {}
-    inputs = [server]
+    clients_with_dst = {}
+    unresolved_dst_addresses = {}
+    inputs = [server, dns]
 
     while True:
         reads, _, _ = select.select(inputs, [], [])
@@ -72,6 +144,8 @@ def handle_clients():
                 print(f"New connection: {addr}")
 
                 inputs.append(client)
+            elif sock == dns:
+                pass
             else:
                 # Клиент хочет отправить сообщение
                 data = sock.recv(BUFFER_SIZE)
@@ -87,11 +161,24 @@ def handle_clients():
                     else:
                         print(f'Client {sock.getpeername()} did not accept')
                         inputs.remove(sock)
-                elif sock not in clients_with_destination.keys():
-                    client_connection_request(sock, data)
+                elif sock not in clients_with_dst.keys():
+                    dst_atype = accept_client_connection(data)
 
+                    if dst_atype == ATYPE_IPV4:
+                        pass
+                    elif dst_atype == ATYPE_DOMAINNAME:
+                        domain_name, dst_port = resolve_domain_name(data)
+                        dns_query = create_dns_query(domain_name)
+                        dns.sendall(dns_query)
+                        # unresolved_dst_addresses[]
+                    else:
+                        pass
+
+
+
+                # TODO нужно как то взять отсюда dns адресс
                 else:
-                    dest = clients_with_destination.get(sock)
+                    dest = clients_with_dst.get(sock)
                     if not dest:
                         print(f'Error with destination of client {sock.getppername()}')
                         # TODO сообщить клиенту об ошибке и закрыть соединение
@@ -107,3 +194,12 @@ def init_server():
     server.setblocking(False)
 
     return server
+
+
+def init_dns():
+    dns = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    dns.connect((DNS_ADDRESS, DNS_PORT))
+    dns.setblocking(False)
+
+    return dns
