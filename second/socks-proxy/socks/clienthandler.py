@@ -1,9 +1,12 @@
 import socket
 import select
+import string
 import struct
+import traceback
 from struct import unpack
 
 import dns
+from dns import message
 
 # CONFIG
 SERVER_PORT = 1080
@@ -74,7 +77,7 @@ def client_greeting(message):
         return M_NOTAVAILABLE
 
     for method in methods:
-        if method == M_NOAUTH:
+        if method == ord(M_NOAUTH):
             return M_NOAUTH
 
     return M_NOTAVAILABLE
@@ -84,9 +87,10 @@ def accept_new_client(client, data):
     method = client_greeting(data)
 
     reply = VER + method
+    print(reply)
     client.sendall(reply)
 
-    return method == M_NOTAVAILABLE
+    return method != M_NOTAVAILABLE
 
 
 def accept_client_connection(message):
@@ -121,30 +125,56 @@ def resolve_domain_name(message):
     domain_length = message[4]
     # TODO протестить правильно ли работает
     domain_name = message[5:5 + domain_length]
+    print('HHH' + str(domain_name) + 'HHH')
     dst_port = unpack('>H', message[5 + domain_length:len(message)])[0]
 
     return domain_name, dst_port
 
 
 def create_dns_query(domain):
-    request = dns.message.make_query(domain, dns.rdatatype.A)
-    request.id = IdGenerator.next_id()
-    return request
+    dns_id = IdGenerator.next_id()
+    # TODO проверить domain на то что норм ли ему в строке
+    dns_query = dns.message.make_query(str(domain), dns.rdatatype.A, id=dns_id)
+    dns_query.flags |= dns.flags.CD | dns.flags.AD
+    print('DNS QUERY:' + str(dns_query))
+    return dns_query, dns_id
 
 
 def response_on_connection_request(client, status, atype, bound_address, bound_port):
-    reply = VER + status + RSV + atype + bound_address + struct.pack('BB', bound_port)
+    reply = VER + status + RSV + atype + bound_address + struct.pack('>H', bound_port)
     client.send(reply)
+    print(f'Response on client\'s connection {client.getpeername()} sent')
+
+
+def resolve_dns_response(response_data):
+    response = dns.message.from_wire(response_data)
+    print('DNS RESPONSE:' + str(response))
+
+    if response.answer:
+        return response.answer[0][0].address, response.id
+    else:
+        return None, response.id
 
 
 def handle_clients():
     server = init_server()
     dns_sock = init_dns()
     clients = []
-    destinations = []
+
+    # сокет клиента : сокет дистанта
     clients_with_dst = {}
+
+    # сокет дистанта : сокет клиента
+    dst_with_clients = {}
+
+    # Id днс : сокет клиента
     clients_waiting_dns = {}
+
+    # Id днс : порт дистанта
+    dns_id_with_dst_port = {}
     inputs = [server, dns_sock]
+
+    print(f'Server start receiving messages on address {server.getsockname()}')
 
     while True:
         reads, _, _ = select.select(inputs, [], [])
@@ -157,71 +187,131 @@ def handle_clients():
                 inputs.append(client)
             elif sock == dns_sock:
                 # Днс прислал ответ
+
                 response_data = dns_sock.recv(BUFFER_SIZE)
-                response = dns.message.from_wire(response_data)
-                answer = response.answer[0]
-                if answer.rdtype == dns.rdatatype.A:
-                    print(f"Resolved IP for ID {response.id}: {answer[0].address}")
-                else:
-                    print("error, rdtype != ipv4")
-                client = clients_waiting_dns[response.id]
-                clients_with_dst[client] = answer[0].address
+                dst_addr, dns_id = resolve_dns_response(response_data)
 
+                if not dst_addr:
+                    print('No address for this domain')
+                    del dns_id_with_dst_port[dns_id]
+                    continue
 
+                dst_port = dns_id_with_dst_port[dns_id]
+                dst_sock = init_dst_sock(dst_addr, dst_port)
+                response_on_connection_request(sock, ST_REQUEST_GRANTED, ATYPE_DOMAINNAME, dst_addr, dst_port)
+                inputs.append(dst_sock)
+                client = clients_waiting_dns[dns_id]
+                print(f'Dns server answered to {client.address}')
+                clients_with_dst[client] = dst_sock
+                dst_with_clients[dst_sock] = client
+                del dns_id_with_dst_port[dns_id]
             else:
                 # Клиент хочет отправить сообщение
                 response_data = sock.recv(BUFFER_SIZE)
+                print('respnsed data:' + str(response_data))
+                if False:
+                    pass
                 if not response_data:
-                    # Клиент выходит
-                    print(f'Client {sock.getpeername()} disconnected')
-                    inputs.remove(sock)
-                    sock.close()
 
-                if sock not in clients:
+                    if sock in clients:
+                        # Выходит клиент
+                        print(f'Client {sock.getsockname()} disconnected')
+
+                        dst_sock = clients_with_dst.get(sock)
+
+                        if dst_sock:
+                            dst_sock.close()
+                            del dst_with_clients[dst_sock]
+                            del clients_with_dst[sock]
+
+                        sock.close()
+                    else:
+                        # Выходит дистант
+                        print(f'Destination {sock.getpeername()} disconnect')
+                        client = dst_with_clients.get(sock)
+
+                        if client:
+                            client.close()
+                            del dst_with_clients[sock]
+                            del clients_with_dst[client]
+
+                        sock.close()
+
+                    inputs.remove(sock)
+
+                elif sock not in clients:
                     # первое сообщение от клиента после коннекта
+
                     if accept_new_client(sock, response_data):
                         # проверяем правильная ли версия socks пришла от клиента и метод
-                        print(f'Client {sock.getpeername()} accepted')
+                        print(f'Client {sock.getsockname()} accepted')
                         clients.append(sock)
                     else:
-                        print(f'Client {sock.getpeername()} did not accept')
+                        print(f'Client {sock.getsockname()} did not accept')
                         inputs.remove(sock)
+
                 elif sock not in clients_with_dst.keys():
                     # Если клиент еще не отправил сообщение с адресом
-                    dst_atype = accept_client_connection(response_data)
 
+                    dst_atype = accept_client_connection(response_data)
+                    print(f'Client {sock} sent message about dest')
                     if dst_atype == ATYPE_IPV4:
+                        # IPV4
                         dst_addr = socket.inet_ntoa(response_data[4:-2])
                         dst_port = unpack('>H', response_data[8:])[0]
 
                         dst_sock = init_dst_sock(dst_addr, dst_port)
                         clients_with_dst[sock] = dst_sock
+                        dst_with_clients[dst_sock] = sock
                         response_on_connection_request(sock, ST_REQUEST_GRANTED, dst_atype, dst_addr, dst_port)
+                        inputs.append(dst_sock)
 
                     elif dst_atype == ATYPE_DOMAINNAME:
+                        # DOMAIN NAME
                         domain_name, dst_port = resolve_domain_name(response_data)
-                        dns_query = create_dns_query(domain_name)
-                        dns_sock.sendall(dns_query.to_wire())
-                        clients_waiting_dns[dns_query.id] = sock
+                        dns_query, dns_id = create_dns_query(domain_name)
+                        # print(dns_query)
+                        dns_sock.send(dns_query.to_wire())
+                        # print(dns_query)
+                        clients_waiting_dns[dns_id] = sock
+                        dns_id_with_dst_port[dst_port] = dns_id
+                        print(f'Client {sock.getsockname()} waiting a domain resolve from dns server')
                     else:
-                        response_on_connection_request(sock, ST_PROTOCOL_ERROR, dst_atype)
+                        # UNSUPPORTED
+                        # TODO подумать
+                        print(f'Unknown atype, message: {response_data}')
+                        # response_on_connection_request(sock, ST_PROTOCOL_ERROR, ATYPE_IPV4, )
+                        # pass
 
-                elif sock in clients_with_dst.values():
+                elif sock in dst_with_clients.keys():
                     # Пришло сообщение от dst
 
-                    pass
+                    client = dst_with_clients[sock]
+                    print(f'Received message from dest {sock.getsockname()} to client {client.getsockname()}')
+                    client.sendall(response_data)
+
                 else:
-                    dest = clients_with_dst[sock]
-                    if not dest:
-                        print(f'Error with destination of client {sock.getppername()}')
+                    # Пришло сообщение От клиента дистанту
+
+                    dst = clients_with_dst[sock]
+                    print(f'Received message from client {sock.getsockname()} to dest {dst.getsockname()}')
+                    if not dst:
+                        error(f'Error with destination of client {sock.getppername()}')
                         # TODO сообщить клиенту об ошибке и закрыть соединение
+                        sock.close()
+                        dst.close()
+                        inputs.remove(sock)
+                        clients.remove(sock)
+                        del clients_with_dst[sock]
+                        del dst_with_clients[dst]
                     else:
-                        dest.sendall(response_data)
+                        dst.sendall(response_data)
 
 
 def init_dst_sock(dst_addr, dst_port):
     dst_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
+    # TODO проверить на исключения
     dst_sock.connect((dst_addr, dst_port))
     dst_sock.setblocking(False)
 
@@ -239,9 +329,12 @@ def init_server():
 
 
 def init_dns():
-    dns = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    dns_sck = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        dns_sck.connect((DNS_ADDRESS, DNS_PORT))
+    except socket.error as err:
+        print('err')
 
-    dns.connect((DNS_ADDRESS, DNS_PORT))
-    dns.setblocking(False)
+    dns_sck.setblocking(False)
 
-    return dns
+    return dns_sck
