@@ -37,9 +37,6 @@ M_NOTAVAILABLE = b'\xff'
 ST_REQUEST_GRANTED = b'\x00'
 '''Status request granted'''''
 
-ST_GENERAL_FAILURE = b'\x01'
-'''Status general failure'''
-
 ST_HOST_UNREACHABLE = b'\x04'
 '''Status host unreachable'''
 
@@ -55,13 +52,16 @@ ATYPE_DOMAINNAME = b'\x03'
 
 # UTILS
 BUFFER_SIZE = 4 * 1024
+'''Buffer size'''
 
 
 class IdGenerator:
+    """ Generate ids for dns queries """
     __next_id = 0
 
     @staticmethod
     def next_id():
+        """ get next id """
         cur_id = IdGenerator.__next_id
         if IdGenerator.__next_id + 1 == 65535:
             IdGenerator.__next_id = 0
@@ -89,6 +89,7 @@ EXIT = ExitStatus()
 
 
 def exit_handler(signum, frame):
+    """handle signals"""
     print('Signal handler called with signal', signum)
     EXIT.set_status(True)
 
@@ -97,6 +98,11 @@ def exit_handler(signum, frame):
 
 
 def client_greeting(data):
+    """identifier client version"""
+    # +----+----------+----------+
+    # |VER | NMETHODS | METHODS  |
+    # +----+----------+----------+
+
     if VER != data[0:1]:
         return M_NOTAVAILABLE
 
@@ -113,6 +119,12 @@ def client_greeting(data):
 
 
 def accept_new_client(client, data):
+    """replying on client greeting message"""
+    # Server reply
+    # +----+--------+
+    # |VER | METHOD |
+    # +----+--------+
+
     method = client_greeting(data)
 
     reply = VER + method
@@ -121,49 +133,60 @@ def accept_new_client(client, data):
     return method != M_NOTAVAILABLE
 
 
-def accept_client_connection(message):
-    #   +-----+-----+-------+------+----------+----------+
-    #   | VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
-    #   +-----+-----+-------+------+----------+----------+
+def accept_client_connection(data):
+    """checking client request details"""
+    # Client message structure
+    # +-----+-----+-------+------+----------+----------+
+    # | VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+    # +-----+-----+-------+------+----------+----------+
 
     if (
-            VER != message[0:1] or
-            CMD_ESTABLISH_TCPIP != message[1:2] or
-            RSV != message[2:3]
+            VER != data[0:1] or
+            CMD_ESTABLISH_TCPIP != data[1:2] or
+            RSV != data[2:3]
     ):
         return None
 
-    if message[3:4] == ATYPE_IPV4:
+    if data[3:4] == ATYPE_IPV4:
         return ATYPE_IPV4
-    elif message[3:4] == ATYPE_DOMAINNAME:
+    elif data[3:4] == ATYPE_DOMAINNAME:
         return ATYPE_DOMAINNAME
     else:
         return None
 
 
-def resolve_domain_name(message):
-    domain_length = message[4]
-    domain_name = message[5:5 + domain_length]
-    dst_port = unpack('>H', message[5 + domain_length:len(message)])[0]
-
-    return domain_name, dst_port
-
-
-def create_dns_query(domain):
-    dns_id = IdGenerator.next_id()
-    dns_query = dns.message.make_query(str(domain)[2:-1], dns.rdatatype.A, id=dns_id)
-    dns_query.flags |= dns.flags.CD | dns.flags.AD
-    return dns_query, dns_id
-
-
 def response_on_connection_request(status, atype, dst_sock):
+    """create response on client request details message"""
+    # Server Reply
+    # +----+-----+-------+------+----------+----------+
+    # |VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+    # +----+-----+-------+------+----------+----------+
+
     bnd = socket.inet_aton(dst_sock.getsockname()[0]) + struct.pack('>H', dst_sock.getsockname()[1])
     reply = VER + status + RSV + atype + bnd
 
     return reply
 
 
+def resolve_domain_name(data):
+    """resolving domain name from client message"""
+    domain_length = data[4]
+    domain_name = data[5:5 + domain_length]
+    dst_port = unpack('>H', data[5 + domain_length:len(data)])[0]
+
+    return domain_name, dst_port
+
+
+def create_dns_query(domain):
+    """create dns query on domain name from client"""
+    dns_id = IdGenerator.next_id()
+    dns_query = dns.message.make_query(str(domain)[2:-1], dns.rdatatype.A, id=dns_id)
+    dns_query.flags |= dns.flags.CD | dns.flags.AD
+    return dns_query, dns_id
+
+
 def resolve_dns_response(response_data):
+    """resolving domain name to (IPv4 address, dns request id) from dns response"""
     response = dns.message.from_wire(response_data)
 
     if response.answer:
@@ -175,6 +198,7 @@ def resolve_dns_response(response_data):
 
 
 def proxy_loop():
+    """Non-blocking proxy loop for accepting clients"""
     clients = []
 
     # сокет клиента : сокет дистанта
@@ -389,6 +413,7 @@ def proxy_loop():
 
 
 def init_dst_sock(dst_addr, dst_port):
+    """init destination socket"""
     dst_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         dst_sock.connect((dst_addr, dst_port))
@@ -400,6 +425,7 @@ def init_dst_sock(dst_addr, dst_port):
 
 
 def init_server():
+    """init server socket"""
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     server_sock.bind((SERVER_ADDRESS, SERVER_PORT))
@@ -410,6 +436,7 @@ def init_server():
 
 
 def init_dns():
+    """init dns socket"""
     dns_sck = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         dns_sck.connect((DNS_ADDRESS, DNS_PORT))
@@ -429,6 +456,7 @@ inputs = [server, dns_sock]
 
 
 def handle_clients():
+    """start point to run proxy loop for accepting clients"""
     signal(SIGINT, exit_handler)
     signal(SIGTERM, exit_handler)
 
