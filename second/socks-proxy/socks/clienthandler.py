@@ -11,7 +11,6 @@ from dns import message
 # CONFIG
 SERVER_PORT = 1080
 SERVER_ADDRESS = '0.0.0.0'
-OUTGOING_INTERFACE = "wlp3s0"
 
 DNS_PORT = 53
 DNS_ADDRESS = '8.8.8.8'
@@ -144,7 +143,6 @@ def accept_client_connection(message):
 
 def resolve_domain_name(message):
     domain_length = message[4]
-    # TODO протестить правильно ли работает
     domain_name = message[5:5 + domain_length]
     dst_port = unpack('>H', message[5 + domain_length:len(message)])[0]
 
@@ -153,7 +151,6 @@ def resolve_domain_name(message):
 
 def create_dns_query(domain):
     dns_id = IdGenerator.next_id()
-    # TODO проверить domain на то что норм ли ему в строке
     dns_query = dns.message.make_query(str(domain)[2:-1], dns.rdatatype.A, id=dns_id)
     dns_query.flags |= dns.flags.CD | dns.flags.AD
     return dns_query, dns_id
@@ -187,7 +184,7 @@ def proxy_loop():
     dst_with_clients = {}
 
     # Id днс : сокет клиента
-    clients_waiting_dns = {}
+    dns_id_with_clients = {}
 
     # Id днс : порт дистанта
     dns_id_with_dst_port = {}
@@ -195,8 +192,13 @@ def proxy_loop():
     print(f'Server start receiving messages on address {server.getsockname()}\n')
 
     while not EXIT.get_status():
-        reads, _, _ = select.select(inputs, [], [])
+        try:
+            reads, _, _ = select.select(inputs, [], [])
+        except socket.error:
+            print(f'Error select', file=sys.stderr)
+            continue
         for sock in reads:
+
             if sock == server:
                 # Клиент хочет присоединиться
                 client, addr = server.accept()
@@ -209,13 +211,16 @@ def proxy_loop():
                 response_data = dns_sock.recv(BUFFER_SIZE)
                 dst_addr, dns_id = resolve_dns_response(response_data)
 
-                client = clients_waiting_dns.get(dns_id)
+                client = dns_id_with_clients.get(dns_id, None)
+
                 if not client:
                     print(f'Client does not wating dns', file=sys.stderr)
+                    del dns_id_with_dst_port[dns_id]
+                    del dns_id_with_clients[dns_id]
                     continue
                 if not dst_addr:
                     print(f'Dns does not know about domain for {client.getsockname()}', file=sys.stderr)
-                    del dns_id_with_dst_port[dns_id]
+
                     reply = response_on_connection_request(ST_HOST_UNREACHABLE, ATYPE_IPV4, sock)
                 else:
                     dst_port = dns_id_with_dst_port[dns_id]
@@ -226,15 +231,16 @@ def proxy_loop():
                         inputs.append(dst_sock)
                         clients_with_dst[client] = dst_sock
                         dst_with_clients[dst_sock] = client
-                        del dns_id_with_dst_port[dns_id]
+
                         reply = response_on_connection_request(ST_REQUEST_GRANTED, ATYPE_IPV4, dst_sock)
                 try:
                     print(f'Dns received resolved domain for {client.getsockname()}')
                     client.send(reply)
                 except socket.error:
-                    print('Error while sending response message to client')
+                    print('Error while sending response message to client', file=sys.stderr)
                     continue
-
+                del dns_id_with_dst_port[dns_id]
+                del dns_id_with_clients[dns_id]
             else:
                 # Кто то хочет отправить сообщение
 
@@ -243,12 +249,22 @@ def proxy_loop():
                 except ConnectionResetError:
                     sock.close()
                     inputs.remove(sock)
-                    dst = clients_with_dst.get(sock)
-                    if dst:
-                        dst.close()
-                        del clients_with_dst[sock]
-                        del dst_with_clients[dst]
-                        inputs.remove(dst)
+                    if sock in clients:
+                        dst = clients_with_dst.get(sock)
+                        if dst:
+                            dst.close()
+                            del clients_with_dst[sock]
+                            del dst_with_clients[dst]
+                            inputs.remove(dst)
+                            clients.remove(sock)
+                    else:
+                        client = dst_with_clients.get(sock)
+                        client.close()
+                        del clients_with_dst[client]
+                        del dst_with_clients[sock]
+                        clients.remove(client)
+                        inputs.remove(client)
+
                     print(f'Connection reset for sock', file=sys.stderr)
                     continue
                 except socket.error:
@@ -271,36 +287,38 @@ def proxy_loop():
                             if dst_sock in inputs:
                                 inputs.remove(dst_sock)
 
-                        sock.close()
                         clients.remove(sock)
-                        # inputs.remove(sock)
                     else:
                         # Выходит дистант
+                        print(f'Dist {sock.getsockname()} disconnected')
+
                         client = dst_with_clients.get(sock, None)
 
                         if client:
                             client.close()
                             del dst_with_clients[sock]
                             del clients_with_dst[client]
+                            if client in clients:
+                                clients.remove(client)
                             if client in inputs:
                                 inputs.remove(client)
 
-                        # inputs.remove(sock)
-                        sock.close()
-
+                    sock.close()
                     inputs.remove(sock)
                 elif sock in dst_with_clients.keys():
                     # Пришло сообщение от dst
                     client = dst_with_clients.get(sock, None)
                     if not client:
                         print('Dst sent message to unknown client', file=sys.stderr)
+                        sock.close()
                         inputs.remove(sock)
                         continue
                     try:
                         print(f'Dst {sock.getsockname()} sent message to client {client.getsockname()}')
-                        client.sendall(response_data)
+                        client.send(response_data)
                     except BrokenPipeError:
                         print(f'Broken pipe error with {client.getsockname()}', file=sys.stderr)
+
                 elif sock not in clients:
                     # первое сообщение от клиента после коннекта
 
@@ -321,16 +339,21 @@ def proxy_loop():
                         # IPV4
                         dst_addr = socket.inet_ntoa(response_data[4:-2])
                         dst_port = unpack('>H', response_data[8:])[0]
-
                         dst_sock = init_dst_sock(dst_addr, dst_port)
-                        clients_with_dst[sock] = dst_sock
-                        dst_with_clients[dst_sock] = sock
                         reply = response_on_connection_request(ST_REQUEST_GRANTED, dst_atype, dst_sock)
+
                         try:
                             sock.send(reply)
                         except socket.error:
                             print('Error while sending response message to client', file=sys.stderr)
+                            sock.close()
+                            dst_sock.close()
+                            inputs.remove(sock)
+                            clients.remove(sock)
                             continue
+
+                        clients_with_dst[sock] = dst_sock
+                        dst_with_clients[dst_sock] = sock
                         inputs.append(dst_sock)
 
                     elif dst_atype == ATYPE_DOMAINNAME:
@@ -338,24 +361,25 @@ def proxy_loop():
                         domain_name, dst_port = resolve_domain_name(response_data)
                         dns_query, dns_id = create_dns_query(domain_name)
                         dns_sock.send(dns_query.to_wire())
-                        clients_waiting_dns[dns_id] = sock
+                        dns_id_with_clients[dns_id] = sock
                         dns_id_with_dst_port[dns_id] = dst_port
                         print(f'Client {sock.getsockname()} waiting a domain resolve from dns server')
                     else:
                         # UNSUPPORTED
                         print(f'Unsupported atype, message: {response_data}', file=sys.stderr)
                         response_on_connection_request(ST_COMMAND_NOT_SUPPORTED, ATYPE_IPV4, sock)
-
+                        sock.close()
+                        clients.remove(sock)
+                        inputs.remove(sock)
                 else:
                     # Пришло сообщение От клиента дистанту
                     print(f'Client {sock.getsockname()} sent message to dst')
                     dst = clients_with_dst.get(sock, None)
                     if not dst:
                         print(f'Error with destination of client {sock.getsockname()}', file=sys.stderr)
-                        # TODO сообщить клиенту об ошибке и закрыть соединение
                         sock.close()
-                        inputs.remove(sock)
                         clients.remove(sock)
+                        inputs.remove(sock)
                     else:
                         try:
                             dst.send(response_data)
@@ -366,17 +390,6 @@ def proxy_loop():
 
 def init_dst_sock(dst_addr, dst_port):
     dst_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    try:
-        dst_sock.setsockopt(
-            socket.SOL_SOCKET,
-            socket.SO_BINDTODEVICE,
-            OUTGOING_INTERFACE.encode(),
-        )
-    except PermissionError:
-        print('Only root can set OUTGOING_INTERFACE parameter', file=sys.stderr)
-
-    # TODO проверить на исключения
     try:
         dst_sock.connect((dst_addr, dst_port))
         dst_sock.setblocking(False)
