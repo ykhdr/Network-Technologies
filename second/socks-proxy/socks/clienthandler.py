@@ -51,7 +51,7 @@ ATYPE_DOMAINNAME = b'\x03'
 '''Domain name (03)'''
 
 # UTILS
-BUFFER_SIZE = 4 * 1024
+BUFFER_SIZE = 1024 * 1024
 '''Buffer size'''
 
 
@@ -342,6 +342,15 @@ def proxy_loop():
                         client.send(response_data)
                     except BrokenPipeError:
                         print(f'Broken pipe error with {client.getsockname()}', file=sys.stderr)
+                    except BlockingIOError:
+                        print(f'Blocking IO error with {client.getsockname()}', file=sys.stderr)
+                        continue
+                    except ConnectionResetError:
+                        client.close()
+                        sock.slose()
+                        inputs.remove(sock)
+                        inputs.remove(client)
+
 
                 elif sock not in clients:
                     # первое сообщение от клиента после коннекта
