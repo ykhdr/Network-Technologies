@@ -41,3 +41,17 @@ def print_weather(location_name, weather):
             Speed: {weather['wind']['speed']} meter/sec
             Direction: {weather['wind']['deg']}° 
     """))
+
+
+def print_descriptions(location_name, descriptions):
+    print(dedent(f"""\
+        ----Interesting places in {location_name}----
+        """))
+
+    for item in descriptions:
+        print(dedent(f"""\
+            Name : {item['title']}    
+            Short title : {item['short_title']}
+            Phone : {item['phone']}
+            Description: {item['description'][3:-4]}
+        """))

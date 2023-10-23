@@ -16,6 +16,7 @@ async def main():
     location = locations[chosen_ind]
     weather, places = await controller.find_weather_and_interesting_places(location)
     console.print_weather(location['name'], weather)
+    console.print_descriptions(location['name'], places)
 
 
 if __name__ == "__main__":

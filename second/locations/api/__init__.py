@@ -1,4 +1,4 @@
 import logging
 import sys
 
-logging.basicConfig(stream=sys.stdout)
+logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
