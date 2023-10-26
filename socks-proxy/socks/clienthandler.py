@@ -93,9 +93,6 @@ def exit_handler(signum, frame):
     print('Signal handler called with signal', signum)
     EXIT.set_status(True)
 
-    for sock in inputs:
-        sock.close()
-
 
 def client_greeting(data):
     """identifier client version"""
@@ -197,7 +194,234 @@ def resolve_dns_response(response_data):
     return None, response.id
 
 
-def proxy_loop():
+def handle_new_client_connection(server, inputs):
+    client, addr = server.accept()
+    print(f'New connection: {addr}')
+
+    inputs.append(client)
+
+
+def handle_dns_response(dns_sock, inputs, dns_id_with_clients, dns_id_with_dst_port, clients_with_dst,
+                        dst_with_clients):
+    response_data = dns_sock.recv(BUFFER_SIZE)
+    dst_addr, dns_id = resolve_dns_response(response_data)
+
+    client = dns_id_with_clients.get(dns_id, None)
+
+    if not client:
+        print(f'Client does not wating dns', file=sys.stderr)
+        del dns_id_with_dst_port[dns_id]
+        del dns_id_with_clients[dns_id]
+        return
+    if not dst_addr:
+        print(f'Dns does not know about domain for {client.getsockname()}', file=sys.stderr)
+
+        reply = response_on_connection_request(ST_HOST_UNREACHABLE, ATYPE_IPV4, client)
+    else:
+        dst_port = dns_id_with_dst_port[dns_id]
+        dst_sock = init_dst_sock(dst_addr, dst_port)
+        if not dst_sock:
+            reply = response_on_connection_request(ST_HOST_UNREACHABLE, ATYPE_IPV4, client)
+        else:
+            inputs.append(dst_sock)
+            clients_with_dst[client] = dst_sock
+            dst_with_clients[dst_sock] = client
+
+            reply = response_on_connection_request(ST_REQUEST_GRANTED, ATYPE_IPV4, dst_sock)
+    try:
+        print(f'Dns received resolved domain for {client.getsockname()}')
+        client.send(reply)
+    except socket.error:
+        print('Error while sending response message to client', file=sys.stderr)
+        return
+    del dns_id_with_dst_port[dns_id]
+    del dns_id_with_clients[dns_id]
+
+
+def handle_connection_reset_error(sock, inputs, clients, clients_with_dst, dst_with_clients):
+    sock.close()
+    inputs.remove(sock)
+    if sock in clients:
+        dst = clients_with_dst.get(sock)
+        if dst:
+            dst.close()
+            del clients_with_dst[sock]
+            del dst_with_clients[dst]
+            inputs.remove(dst)
+            clients.remove(sock)
+    else:
+        client = dst_with_clients.get(sock)
+        client.close()
+        del clients_with_dst[client]
+        del dst_with_clients[sock]
+        clients.remove(client)
+        inputs.remove(client)
+
+    print(f'Connection reset for sock', file=sys.stderr)
+
+
+def handle_client_leave(client, clients, inputs, clients_with_dst, dst_with_clients):
+    print(f'Client {client.getsockname()} disconnected')
+
+    dst_sock = clients_with_dst.get(client, None)
+
+    if dst_sock:
+        dst_sock.close()
+
+        del dst_with_clients[dst_sock]
+        del clients_with_dst[client]
+        if dst_sock in inputs:
+            inputs.remove(dst_sock)
+
+    clients.remove(client)
+
+
+def handle_dst_leave(dst, clients, inputs, clients_with_dst, dst_with_clients):
+    print(f'Dist {dst.getsockname()} disconnected')
+
+    client = dst_with_clients.get(dst, None)
+
+    if client:
+        client.close()
+        del dst_with_clients[dst]
+        del clients_with_dst[client]
+        if client in clients:
+            clients.remove(client)
+        if client in inputs:
+            inputs.remove(client)
+
+
+def handle_dst_message(dst, inputs, dst_with_clients, data):
+    client = dst_with_clients.get(dst, None)
+    if not client:
+        print('Dst sent message to unknown client', file=sys.stderr)
+        dst.close()
+        inputs.remove(dst)
+        return
+    try:
+        print(f'Dst {dst.getsockname()} sent message to client {client.getsockname()}')
+        client.send(data)
+    except BrokenPipeError:
+        print(f'Broken pipe error with {client.getsockname()}', file=sys.stderr)
+    except BlockingIOError:
+        print(f'Blocking IO error with {client.getsockname()}', file=sys.stderr)
+    except ConnectionResetError:
+        client.close()
+        dst.slose()
+        inputs.remove(dst)
+        inputs.remove(client)
+
+
+def handle_client_greeting(client, clients, inputs, data):
+    if accept_new_client(client, data):
+        # проверяем правильная ли версия socks пришла от клиента и метод
+        print(f'Client {client.getsockname()} accepted')
+        clients.append(client)
+    else:
+        print(f'Client {client.getsockname()} did not accept', file=sys.stderr)
+        inputs.remove(client)
+
+
+def handle_client_connection_request(client, dns_sock, inputs, clients, clients_with_dst, dst_with_clients,
+                                     dns_id_with_clients, dns_id_with_dst_port, data):
+    dst_atype = accept_client_connection(data)
+    print(f'Client {client.getsockname()} sent message about dest')
+    if dst_atype == ATYPE_IPV4:
+        # IPV4
+        dst_addr = socket.inet_ntoa(data[4:-2])
+        dst_port = unpack('>H', data[8:])[0]
+        dst_sock = init_dst_sock(dst_addr, dst_port)
+        reply = response_on_connection_request(ST_REQUEST_GRANTED, dst_atype, dst_sock)
+
+        try:
+            client.send(reply)
+        except socket.error:
+            print('Error while sending response message to client', file=sys.stderr)
+            client.close()
+            dst_sock.close()
+            inputs.remove(client)
+            clients.remove(client)
+            return
+
+        clients_with_dst[client] = dst_sock
+        dst_with_clients[dst_sock] = client
+        inputs.append(dst_sock)
+
+    elif dst_atype == ATYPE_DOMAINNAME:
+        # DOMAIN NAME
+        domain_name, dst_port = resolve_domain_name(data)
+        dns_query, dns_id = create_dns_query(domain_name)
+        dns_sock.send(dns_query.to_wire())
+        dns_id_with_clients[dns_id] = client
+        dns_id_with_dst_port[dns_id] = dst_port
+        print(f'Client {client.getsockname()} waiting a domain resolve from dns server')
+    else:
+        # UNSUPPORTED
+        print(f'Unsupported atype, message: {data}', file=sys.stderr)
+        response_on_connection_request(ST_COMMAND_NOT_SUPPORTED, ATYPE_IPV4, client)
+        client.close()
+        clients.remove(client)
+        inputs.remove(client)
+
+
+def handle_client_message(client, clients, inputs, clients_with_dst, data):
+    print(f'Client {client.getsockname()} sent message to dst')
+    dst = clients_with_dst.get(client, None)
+    if not dst:
+        print(f'Error with destination of client {client.getsockname()}', file=sys.stderr)
+        client.close()
+        clients.remove(client)
+        inputs.remove(client)
+    else:
+        try:
+            dst.send(data)
+        except socket.error:
+            print('Error while sending to dst', file=sys.stderr)
+
+
+def handle_message(sock, dns_sock, inputs, clients, clients_with_dst, dst_with_clients, dns_id_with_clients,
+                   dns_id_with_dst_port):
+    try:
+        data = sock.recv(BUFFER_SIZE)
+    except ConnectionResetError:
+        handle_connection_reset_error(sock, inputs, clients, clients_with_dst, dst_with_clients)
+        return
+    except socket.error:
+        print('Error while receiving data', file=sys.stderr)
+        return
+
+    if not data:
+
+        if sock in clients:
+            # Выходит клиент
+            handle_client_leave(sock, clients, inputs, clients_with_dst, dst_with_clients)
+        else:
+            # Выходит дистант
+            handle_dst_leave(sock, clients, inputs, clients_with_dst, dst_with_clients)
+
+        sock.close()
+        inputs.remove(sock)
+    elif sock in dst_with_clients.keys():
+        # Пришло сообщение от dst
+        handle_dst_message(sock, inputs, dst_with_clients, data)
+
+    elif sock not in clients:
+        # первое сообщение от клиента после коннекта
+        handle_client_greeting(sock, clients, inputs, data)
+
+    elif sock not in clients_with_dst.keys():
+        # Если клиент еще не отправил сообщение с адресом
+        handle_client_connection_request(sock, dns_sock, inputs, clients, clients_with_dst, dst_with_clients,
+                                         dns_id_with_clients, dns_id_with_dst_port, data)
+
+    else:
+        handle_client_message(sock, clients, inputs, clients_with_dst, data)
+
+
+# Пришло сообщение От клиента дистанту
+
+
+def proxy_loop(server, dns_sock, inputs):
     """Non-blocking proxy loop for accepting clients"""
     clients = []
 
@@ -225,200 +449,22 @@ def proxy_loop():
 
             if sock == server:
                 # Клиент хочет присоединиться
-                client, addr = server.accept()
-                print(f'New connection: {addr}')
-
-                inputs.append(client)
+                handle_new_client_connection(server, inputs)
             elif sock == dns_sock:
                 # Днс прислал ответ
-
-                response_data = dns_sock.recv(BUFFER_SIZE)
-                dst_addr, dns_id = resolve_dns_response(response_data)
-
-                client = dns_id_with_clients.get(dns_id, None)
-
-                if not client:
-                    print(f'Client does not wating dns', file=sys.stderr)
-                    del dns_id_with_dst_port[dns_id]
-                    del dns_id_with_clients[dns_id]
-                    continue
-                if not dst_addr:
-                    print(f'Dns does not know about domain for {client.getsockname()}', file=sys.stderr)
-
-                    reply = response_on_connection_request(ST_HOST_UNREACHABLE, ATYPE_IPV4, sock)
-                else:
-                    dst_port = dns_id_with_dst_port[dns_id]
-                    dst_sock = init_dst_sock(dst_addr, dst_port)
-                    if not dst_sock:
-                        reply = response_on_connection_request(ST_HOST_UNREACHABLE, ATYPE_IPV4, sock)
-                    else:
-                        inputs.append(dst_sock)
-                        clients_with_dst[client] = dst_sock
-                        dst_with_clients[dst_sock] = client
-
-                        reply = response_on_connection_request(ST_REQUEST_GRANTED, ATYPE_IPV4, dst_sock)
-                try:
-                    print(f'Dns received resolved domain for {client.getsockname()}')
-                    client.send(reply)
-                except socket.error:
-                    print('Error while sending response message to client', file=sys.stderr)
-                    continue
-                del dns_id_with_dst_port[dns_id]
-                del dns_id_with_clients[dns_id]
+                handle_dns_response(dns_sock, inputs, dns_id_with_clients, dns_id_with_dst_port, clients_with_dst,
+                                    dst_with_clients)
             else:
                 # Кто то хочет отправить сообщение
+                handle_message(sock, dns_sock, inputs, clients, clients_with_dst, dst_with_clients, dns_id_with_clients,
+                               dns_id_with_dst_port)
 
-                try:
-                    response_data = sock.recv(BUFFER_SIZE)
-                except ConnectionResetError:
-                    sock.close()
-                    inputs.remove(sock)
-                    if sock in clients:
-                        dst = clients_with_dst.get(sock)
-                        if dst:
-                            dst.close()
-                            del clients_with_dst[sock]
-                            del dst_with_clients[dst]
-                            inputs.remove(dst)
-                            clients.remove(sock)
-                    else:
-                        client = dst_with_clients.get(sock)
-                        client.close()
-                        del clients_with_dst[client]
-                        del dst_with_clients[sock]
-                        clients.remove(client)
-                        inputs.remove(client)
-
-                    print(f'Connection reset for sock', file=sys.stderr)
-                    continue
-                except socket.error:
-                    print('Error while receiving data', file=sys.stderr)
-                    continue
-
-                if not response_data:
-
-                    if sock in clients:
-                        # Выходит клиент
-                        print(f'Client {sock.getsockname()} disconnected')
-
-                        dst_sock = clients_with_dst.get(sock, None)
-
-                        if dst_sock:
-                            dst_sock.close()
-
-                            del dst_with_clients[dst_sock]
-                            del clients_with_dst[sock]
-                            if dst_sock in inputs:
-                                inputs.remove(dst_sock)
-
-                        clients.remove(sock)
-                    else:
-                        # Выходит дистант
-                        print(f'Dist {sock.getsockname()} disconnected')
-
-                        client = dst_with_clients.get(sock, None)
-
-                        if client:
-                            client.close()
-                            del dst_with_clients[sock]
-                            del clients_with_dst[client]
-                            if client in clients:
-                                clients.remove(client)
-                            if client in inputs:
-                                inputs.remove(client)
-
-                    sock.close()
-                    inputs.remove(sock)
-                elif sock in dst_with_clients.keys():
-                    # Пришло сообщение от dst
-                    client = dst_with_clients.get(sock, None)
-                    if not client:
-                        print('Dst sent message to unknown client', file=sys.stderr)
-                        sock.close()
-                        inputs.remove(sock)
-                        continue
-                    try:
-                        print(f'Dst {sock.getsockname()} sent message to client {client.getsockname()}')
-                        client.send(response_data)
-                    except BrokenPipeError:
-                        print(f'Broken pipe error with {client.getsockname()}', file=sys.stderr)
-                    except BlockingIOError:
-                        print(f'Blocking IO error with {client.getsockname()}', file=sys.stderr)
-                        continue
-                    except ConnectionResetError:
-                        client.close()
-                        sock.slose()
-                        inputs.remove(sock)
-                        inputs.remove(client)
+    close_proxy_loops_sockets(inputs)
 
 
-                elif sock not in clients:
-                    # первое сообщение от клиента после коннекта
-
-                    if accept_new_client(sock, response_data):
-                        # проверяем правильная ли версия socks пришла от клиента и метод
-                        print(f'Client {sock.getsockname()} accepted')
-                        clients.append(sock)
-                    else:
-                        print(f'Client {sock.getsockname()} did not accept', file=sys.stderr)
-                        inputs.remove(sock)
-
-                elif sock not in clients_with_dst.keys():
-                    # Если клиент еще не отправил сообщение с адресом
-
-                    dst_atype = accept_client_connection(response_data)
-                    print(f'Client {sock.getsockname()} sent message about dest')
-                    if dst_atype == ATYPE_IPV4:
-                        # IPV4
-                        dst_addr = socket.inet_ntoa(response_data[4:-2])
-                        dst_port = unpack('>H', response_data[8:])[0]
-                        dst_sock = init_dst_sock(dst_addr, dst_port)
-                        reply = response_on_connection_request(ST_REQUEST_GRANTED, dst_atype, dst_sock)
-
-                        try:
-                            sock.send(reply)
-                        except socket.error:
-                            print('Error while sending response message to client', file=sys.stderr)
-                            sock.close()
-                            dst_sock.close()
-                            inputs.remove(sock)
-                            clients.remove(sock)
-                            continue
-
-                        clients_with_dst[sock] = dst_sock
-                        dst_with_clients[dst_sock] = sock
-                        inputs.append(dst_sock)
-
-                    elif dst_atype == ATYPE_DOMAINNAME:
-                        # DOMAIN NAME
-                        domain_name, dst_port = resolve_domain_name(response_data)
-                        dns_query, dns_id = create_dns_query(domain_name)
-                        dns_sock.send(dns_query.to_wire())
-                        dns_id_with_clients[dns_id] = sock
-                        dns_id_with_dst_port[dns_id] = dst_port
-                        print(f'Client {sock.getsockname()} waiting a domain resolve from dns server')
-                    else:
-                        # UNSUPPORTED
-                        print(f'Unsupported atype, message: {response_data}', file=sys.stderr)
-                        response_on_connection_request(ST_COMMAND_NOT_SUPPORTED, ATYPE_IPV4, sock)
-                        sock.close()
-                        clients.remove(sock)
-                        inputs.remove(sock)
-                else:
-                    # Пришло сообщение От клиента дистанту
-                    print(f'Client {sock.getsockname()} sent message to dst')
-                    dst = clients_with_dst.get(sock, None)
-                    if not dst:
-                        print(f'Error with destination of client {sock.getsockname()}', file=sys.stderr)
-                        sock.close()
-                        clients.remove(sock)
-                        inputs.remove(sock)
-                    else:
-                        try:
-                            dst.send(response_data)
-                        except socket.error:
-                            print('Error while sending to dst', file=sys.stderr)
-                            continue
+def close_proxy_loops_sockets(inputs):
+    for sock in inputs:
+        sock.close()
 
 
 def init_dst_sock(dst_addr, dst_port):
@@ -458,18 +504,17 @@ def init_dns():
     return dns_sck
 
 
-server = init_server()
-dns_sock = init_dns()
-
-inputs = [server, dns_sock]
-
-
 def handle_clients():
     """start point to run proxy loop for accepting clients"""
+    server = init_server()
+    dns_sock = init_dns()
+
+    inputs = [server, dns_sock]
+
     signal(SIGINT, exit_handler)
     signal(SIGTERM, exit_handler)
 
     if not (server or dns_sock):
         return
 
-    proxy_loop()
+    proxy_loop(server, dns_sock, inputs)
