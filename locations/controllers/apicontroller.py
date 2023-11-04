@@ -58,11 +58,8 @@ class _LocationController:
     def find_locations(self, name: string):
         query = {
             "q": name,
-            "locale": "en",
+            "locale": "ru",
             "limit": "5",
-            "reverse": "false",
-            "debug": "false",
-            "point": "45.93272,11.58803",
             "provider": "default",
             "key": os.getenv('LOCATION_KEY')
         }

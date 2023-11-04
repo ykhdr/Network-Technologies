@@ -1,6 +1,8 @@
 FROM python:latest
 
-COPY . .
 RUN pip install dnspython
+
+COPY . /socks
+WORKDIR /socks
+
 CMD ["python3", "main.py"]
-EXPOSE 1080
