@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: socks-proxy
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: socks-proxy
+  template:
+    metadata:
+      labels:
+        app: socks-proxy
+    spec:
+      containers:
+      - name: socks-proxy
+        image: ykhdr/socks-proxy:latest
+        ports:
+        - containerPort: 1080
+
